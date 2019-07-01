@@ -1,0 +1,145 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "6WAQt1cVAznQFctcE+ajyuEYJDo=",
+			"path": "github.com/ericchiang/k8s",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "ZNAg/MkD+FPETAlhiQXz3Q6Ol4A=",
+			"path": "github.com/ericchiang/k8s/apis/apiextensions/v1beta1",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "/JSaCGmJN+FQI2dHMODrZTYH1i0=",
+			"path": "github.com/ericchiang/k8s/apis/core/v1",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "rs36ct9Cc0AvAvcRGluDiZVhFXw=",
+			"path": "github.com/ericchiang/k8s/apis/meta/v1",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "J+8RU//456DUJuK5CE7sQ6tjiPs=",
+			"path": "github.com/ericchiang/k8s/apis/resource",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "52L4t9TRIwIzL2ZL1FYAdlpk7e4=",
+			"path": "github.com/ericchiang/k8s/runtime",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "TACqUluYNHqVcubsLXdkbEH4/yM=",
+			"path": "github.com/ericchiang/k8s/runtime/schema",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "EgwZjTIBdEh4kvdGqWfprYGcTgk=",
+			"path": "github.com/ericchiang/k8s/util/intstr",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "Kj8WnmKc/J5nPYR9PjrAb/zi25E=",
+			"path": "github.com/ericchiang/k8s/watch/versioned",
+			"revision": "d1bbc0cffaf9849ddcae7b9efffae33e2dd52e9a",
+			"revisionTime": "2018-07-26T01:11:48Z",
+			"version": "v1.2.0",
+			"versionExact": "v1.2.0"
+		},
+		{
+			"checksumSHA1": "/NB9AGM1V8sJpHoVtRc47O5F9CQ=",
+			"path": "github.com/ghodss/yaml",
+			"revision": "25d852aebe32c875e9c044af3eef9c7dc6bc777f",
+			"revisionTime": "2019-02-12T21:16:48Z"
+		},
+		{
+			"checksumSHA1": "Wp97rIwFg54dNwuCeR9Vslaehtw=",
+			"path": "github.com/golang/protobuf/proto",
+			"revision": "b85cd75de734650db18a99a943fe351d41387800",
+			"revisionTime": "2019-03-16T01:51:51Z"
+		},
+		{
+			"checksumSHA1": "pCY4YtdNKVBYRbNvODjx8hj0hIs=",
+			"path": "golang.org/x/net/http/httpguts",
+			"revision": "9f648a60d9775ef5c977e7669d1673a7a67bef33",
+			"revisionTime": "2019-03-13T06:50:29Z"
+		},
+		{
+			"checksumSHA1": "pMsrfJZ8JwoPT2pBa1loXKhGODQ=",
+			"path": "golang.org/x/net/http2",
+			"revision": "9f648a60d9775ef5c977e7669d1673a7a67bef33",
+			"revisionTime": "2019-03-13T06:50:29Z"
+		},
+		{
+			"checksumSHA1": "VJwSx33rjMC7O6K2O50Jw6o1vw4=",
+			"path": "golang.org/x/net/http2/hpack",
+			"revision": "9f648a60d9775ef5c977e7669d1673a7a67bef33",
+			"revisionTime": "2019-03-13T06:50:29Z"
+		},
+		{
+			"checksumSHA1": "RcrB7tgYS/GMW4QrwVdMOTNqIU8=",
+			"path": "golang.org/x/net/idna",
+			"revision": "9f648a60d9775ef5c977e7669d1673a7a67bef33",
+			"revisionTime": "2019-03-13T06:50:29Z"
+		},
+		{
+			"checksumSHA1": "CbpjEkkOeh0fdM/V8xKDdI0AA88=",
+			"path": "golang.org/x/text/secure/bidirule",
+			"revision": "5d731a35f4867878fc89f7744f7b6debb3beded6",
+			"revisionTime": "2019-03-06T14:45:11Z"
+		},
+		{
+			"checksumSHA1": "o3YChxWLvyCmkAn/ZNBj9HC9zKw=",
+			"path": "golang.org/x/text/transform",
+			"revision": "5d731a35f4867878fc89f7744f7b6debb3beded6",
+			"revisionTime": "2019-03-06T14:45:11Z"
+		},
+		{
+			"checksumSHA1": "qjFbU4RWY+Caxaa5/TlMJW82E+A=",
+			"path": "golang.org/x/text/unicode/bidi",
+			"revision": "5d731a35f4867878fc89f7744f7b6debb3beded6",
+			"revisionTime": "2019-03-06T14:45:11Z"
+		},
+		{
+			"checksumSHA1": "vAScJLvb0ucuuclyN9vmJUyWTBA=",
+			"path": "golang.org/x/text/unicode/norm",
+			"revision": "5d731a35f4867878fc89f7744f7b6debb3beded6",
+			"revisionTime": "2019-03-06T14:45:11Z"
+		},
+		{
+			"checksumSHA1": "oNqPrS2edE8peI3ah2INe379k8E=",
+			"path": "gopkg.in/yaml.v2",
+			"revision": "51d6538a90f86fe93ac480b35f37b2be17fef232",
+			"revisionTime": "2018-11-15T11:05:04Z"
+		}
+	],
+	"rootPath": "github.com/markvincze/k8s-node-compactor"
+}
