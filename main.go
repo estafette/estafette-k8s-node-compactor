@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -440,10 +439,6 @@ func readNodeLabels(node *corev1.Node) nodeLabels {
 		labels.enabled = false
 	}
 
-	if strings.HasPrefix(*node.Metadata.Name, "gke-production-europ-rulesapi-14-2662") {
-		labels.enabled = true
-	}
-
 	ratioLimitStr, ok := node.Metadata.Labels[labelNodeCompactorScaleDownCPURequestRatioLimit]
 	if ok {
 		l, err := strconv.ParseFloat(ratioLimitStr, 64)
@@ -479,9 +474,6 @@ func readNodeLabels(node *corev1.Node) nodeLabels {
 	} else {
 		labels.scaleDownInProgress = false
 	}
-
-	labels.scaleDownCPURequestRatioLimit = 0.75
-	labels.scaleDownRequiredUnderutilizedNodeCount = 4
 
 	return labels
 }
