@@ -5,13 +5,12 @@ metadata:
   labels:
     app: estafette-k8s-node-compactor
 rules:
-- apiGroups: ["autoscaling"] # "" indicates the core API group
-  resources:
-  - nodes
-  verbs:
-  - list
-  - update
-  - watch
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["nodes"]
+  verbs: ["list", "update", "watch"]
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["list", "update", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding

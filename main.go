@@ -1,26 +1,35 @@
-// TODO:
-// - RBAC
-// - Prometheus
-// - Proper logging
-// - kubernetes.yaml
-// - Dockerfile
-// - estafette.yaml
-// - README
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
+	stdlog "log"
+	"math/rand"
+	"os"
+	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/ericchiang/k8s"
 	corev1 "github.com/ericchiang/k8s/apis/core/v1"
 	"github.com/ghodss/yaml"
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+// TODO:
+// - kubernetes.yaml
+// - Dockerfile
+// - estafette.yaml
+// - README
 
 const labelNodeCompactorEnabled = "estafette.io/node-compactor-enabled"
 const labelNodeCompactorScaleDownCPURequestRatioLimit = "estafette.io/node-compactor-scale-down-cpu-request-ratio-limit"
@@ -55,32 +64,165 @@ type nodeInfo struct {
 	pods   []*corev1.Pod
 }
 
+var (
+	version   string
+	branch    string
+	revision  string
+	buildDate string
+	goVersion = runtime.Version()
+)
+
+var (
+	addr = flag.String("listen-address", ":9101", "The address to listen on for HTTP requests.")
+
+	// seed random number
+	r = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	// Create prometheus counter for the total number of nodes.
+	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_node_count",
+		Help: "The number of nodes in the node pool",
+	}, []string{"nodepool"})
+
+	// Create gauges for the various resource values.
+	allocatableCpus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_allocatable_cpu",
+		Help: "The allocatable CPU value of the node.",
+	}, []string{"node", "nodepool"})
+	allocatableMemory = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_allocatable_memory",
+		Help: "The allocatable memory value (in MB) of the node.",
+	}, []string{"node", "nodepool"})
+	totalCPURequests = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_total_cpu_requests",
+		Help: "The total amount of CPU requests on the node.",
+	}, []string{"node", "nodepool"})
+	totalMemoryRequests = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_total_memory_requests",
+		Help: "The total amount (in MB) of memory requests on the node.",
+	}, []string{"node", "nodepool"})
+	utilizedCPURatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_utilized_cpu_ratio",
+		Help: "The utilized CPU ratio on the node.",
+	}, []string{"node", "nodepool"})
+	utilizedMemoryRatio = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_utilized_memory_ratio",
+		Help: "The utilized memory ratio on the node",
+	}, []string{"node", "nodepool"})
+)
+
+func initPrometheusMetrics() {
+	prometheus.MustRegister(nodesTotal)
+	prometheus.MustRegister(allocatableCpus)
+	prometheus.MustRegister(allocatableMemory)
+	prometheus.MustRegister(totalCPURequests)
+	prometheus.MustRegister(totalMemoryRequests)
+	prometheus.MustRegister(utilizedCPURatio)
+	prometheus.MustRegister(utilizedMemoryRatio)
+}
+
 func main() {
+	// Parse command line parameters.
+	flag.Parse()
+
+	// Log as severity for stackdriver logging to recognize the level.
+	zerolog.LevelFieldName = "severity"
+
+	// Set some default fields added to all logs.
+	log.Logger = zerolog.New(os.Stdout).With().
+		Timestamp().
+		Str("app", "estafette-k8s-hpa-scaler").
+		Str("version", version).
+		Logger()
+
+	// Use zerolog for any logs sent via standard log library.
+	stdlog.SetFlags(0)
+	stdlog.SetOutput(log.Logger)
+
+	log.Info().
+		Str("branch", branch).
+		Str("revision", revision).
+		Str("buildDate", buildDate).
+		Str("goVersion", goVersion).
+		Msg("Starting estafette-k8s-hpa-scaler...")
+
+	// Check required env vars.
+	// prometheusServerURL := os.Getenv("PROMETHEUS_SERVER_URL")
+	// if prometheusServerURL == "" {
+	// 	log.Fatal().Msg("PROMETHEUS_SERVER_URL is required. Please set PROMETHEUS_SERVER_URL environment variable to your Prometheus server service url.")
+	// }
+
 	// client, err := k8s.NewInClusterClient()
 
 	client, err := loadClient("kubeconfig.yaml")
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Could not create the K8s client.")
 	}
 
+	// Start prometheus.
+	// go func() {
+	// 	log.Debug().
+	// 		Str("port", *addr).
+	// 		Msg("Serving Prometheus metrics...")
+
+	// 	http.Handle("/metrics", promhttp.Handler())
+
+	// 	if err := http.ListenAndServe(*addr, nil); err != nil {
+	// 		log.Fatal().Err(err).Msg("Starting Prometheus listener failed")
+	// 	}
+	// }()
+
+	// Define channel used to gracefully shut down the application.
+	gracefulShutdown := make(chan os.Signal)
+
+	signal.Notify(gracefulShutdown, syscall.SIGTERM, syscall.SIGINT)
+
+	waitGroup := &sync.WaitGroup{}
+
+	go func(waitGroup *sync.WaitGroup) {
+		// loop indefinitely
+		for {
+			log.Info().Msg("Running node compaction process")
+
+			// Run the main logic of the controller, which tries to compact the node pool.
+			runNodeCompaction(client)
+
+			// Sleep random time around 300 seconds.
+			sleepTime := applyJitter(300)
+			log.Info().Msgf("Sleeping for %v seconds...", sleepTime)
+			time.Sleep(time.Duration(sleepTime) * time.Second)
+		}
+	}(waitGroup)
+
+	signalReceived := <-gracefulShutdown
+	log.Info().
+		Msgf("Received signal %v. Waiting for running tasks to finish...", signalReceived)
+
+	waitGroup.Wait()
+
+	log.Info().Msg("Shutting down...")
+}
+
+func runNodeCompaction(client *k8s.Client) {
 	var nodes corev1.NodeList
 	if err := client.List(context.Background(), k8s.AllNamespaces, &nodes); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Could not retrieve the list of nodes.")
 	}
 
 	var allPods corev1.PodList
 
 	if err := client.List(context.Background(), k8s.AllNamespaces, &allPods); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Could not retrieve the list of pods.")
 	}
 
 	nodesByPool := groupNodesByPool(nodes.Items)
 
 	for pool, nodes := range nodesByPool {
-		fmt.Printf("Node pool: %s\n", pool)
+		log.Info().Msgf("Node pool: %s\n", pool)
 
 		nodeInfos := collectNodeInfos(nodes, allPods.Items)
+		reportNodePoolMetrics(pool, nodeInfos)
 
 		nodeCountUnderLimit := 0
 		nodeCountScaleDownInProgress := 0
@@ -98,6 +240,9 @@ func main() {
 			}
 		}
 
+		log.Info().Msgf("Number of underutilized nodes: %d", nodeCountUnderLimit)
+		log.Info().Msgf("Number of nodes already being removed: %d", nodeCountScaleDownInProgress)
+
 		// We check if there are enough underutilized pods so that we can initiate a scaledown.
 		// NOTE: We multiply by (nodeCountScaleDownInProgress + 1), because there might be nodes for which
 		// we have initiated the scaledown in previous iterations already, which haven't been removed yet,
@@ -106,19 +251,19 @@ func main() {
 			pick := pickUnderutilizedNodeToRemove(nodeInfos)
 
 			if pick == nil {
-				fmt.Printf("No node was picked for removal.")
+				log.Info().Msg("No node was picked for removal.")
 			} else {
-				fmt.Printf("The node picked for removal:")
-				fmt.Printf("Node %v\n", *pick.node.Metadata.Name)
-				fmt.Printf("Allocatable CPU: %vm, memory: %vMi\n", pick.stats.allocatableCPU, pick.stats.allocatableMemoryMB)
-				fmt.Printf("Pods on node total requests, CPU: %vm, memory: %vMi\n", pick.stats.totalCPURequests, pick.stats.totalMemoryRequests)
-				fmt.Printf("CPU utilization: %v%%, memory utilization: %v%%\n", pick.stats.utilizedCPURatio*100, pick.stats.utilizedMemoryRatio*100)
+				log.Info().Msg("The node picked for removal:")
+				log.Info().Msgf("Node %v\n", *pick.node.Metadata.Name)
+				log.Info().Msgf("Allocatable CPU: %vm, memory: %vMi\n", pick.stats.allocatableCPU, pick.stats.allocatableMemoryMB)
+				log.Info().Msgf("Pods on node total requests, CPU: %vm, memory: %vMi\n", pick.stats.totalCPURequests, pick.stats.totalMemoryRequests)
+				log.Info().Msgf("CPU utilization: %v%%, memory utilization: %v%%\n", pick.stats.utilizedCPURatio*100, pick.stats.utilizedMemoryRatio*100)
 
-				fmt.Printf("Cordoning the node...")
-				cordonNode(pick.node, client)
+				log.Info().Msg("Cordoning the node...")
+				// cordonNode(pick.node, client)
 
-				fmt.Printf("Drain the pods...")
-				drainPods(pick, client)
+				log.Info().Msg("Drain the pods...")
+				// drainPods(pick, client)
 			}
 		}
 	}
@@ -148,9 +293,9 @@ func drainPods(node *nodeInfo, k8sClient *k8s.Client) error {
 func pickUnderutilizedNodeToRemove(nodes []nodeInfo) *nodeInfo {
 	var pick *nodeInfo
 
-	for _, n := range nodes {
+	for i, n := range nodes {
 		if isNodeUnderutilizedCandidate(n) && (pick == nil || n.stats.utilizedCPURatio < pick.stats.utilizedCPURatio) {
-			pick = &n
+			pick = &nodes[i]
 		}
 	}
 
@@ -184,6 +329,19 @@ func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) []nodeInfo {
 	}
 
 	return nodeInfos
+}
+
+func reportNodePoolMetrics(pool string, nodes []nodeInfo) {
+	nodesTotal.WithLabelValues(pool).Set((float64(len(nodes))))
+
+	for _, node := range nodes {
+		allocatableCpus.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.allocatableCPU))
+		allocatableMemory.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.allocatableMemoryMB))
+		totalCPURequests.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.totalCPURequests))
+		totalMemoryRequests.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.totalMemoryRequests))
+		utilizedCPURatio.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.utilizedCPURatio))
+		utilizedMemoryRatio.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.utilizedMemoryRatio))
+	}
 }
 
 func getPodsOnNode(node *corev1.Node, allPods []*corev1.Pod) []*corev1.Pod {
@@ -350,4 +508,10 @@ func loadClient(kubeconfigPath string) (*k8s.Client, error) {
 		return nil, fmt.Errorf("unmarshal kubeconfig: %v", err)
 	}
 	return k8s.NewClient(&config)
+}
+
+func applyJitter(input int) (output int) {
+	deviation := int(0.25 * float64(input))
+
+	return input - deviation + r.Intn(2*deviation)
 }
