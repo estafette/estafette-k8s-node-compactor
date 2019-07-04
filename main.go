@@ -138,12 +138,6 @@ func main() {
 		Str("goVersion", goVersion).
 		Msg("Starting estafette-k8s-hpa-scaler...")
 
-	// Check required env vars.
-	prometheusServerURL := os.Getenv("PROMETHEUS_SERVER_URL")
-	if prometheusServerURL == "" {
-		log.Fatal().Msg("PROMETHEUS_SERVER_URL is required. Please set PROMETHEUS_SERVER_URL environment variable to your Prometheus server service url.")
-	}
-
 	client, err := k8s.NewInClusterClient()
 
 	if err != nil {
