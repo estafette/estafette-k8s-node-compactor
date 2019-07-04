@@ -244,7 +244,7 @@ func runNodeCompaction(client *k8s.Client) {
 				log.Info().Msgf("CPU utilization: %v%%, memory utilization: %v%%\n", pick.stats.utilizedCPURatio*100, pick.stats.utilizedMemoryRatio*100)
 
 				log.Info().Msg("Cordoning the node...")
-				cordonNode(pick.node, client)
+				cordonAndMarkNode(pick.node, client)
 
 				log.Info().Msg("Drain the pods...")
 				drainPods(pick, client)
@@ -253,8 +253,11 @@ func runNodeCompaction(client *k8s.Client) {
 	}
 }
 
-func cordonNode(node *corev1.Node, k8sClient *k8s.Client) error {
+func cordonAndMarkNode(node *corev1.Node, k8sClient *k8s.Client) error {
 	*node.Spec.Unschedulable = true
+
+	// We add an explicit label so in the next iteration we know that this node has already been picked for removal.
+	node.Metadata.Labels[labelNodeCompactorScaleDownInProgress] = "true"
 
 	err := k8sClient.Update(context.Background(), node)
 
