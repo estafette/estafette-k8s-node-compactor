@@ -103,7 +103,7 @@ var (
 	}, []string{"node", "nodepool"})
 )
 
-func initPrometheusMetrics() {
+func init() {
 	prometheus.MustRegister(nodesTotal)
 	prometheus.MustRegister(allocatableCpus)
 	prometheus.MustRegister(allocatableMemory)
@@ -143,8 +143,6 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Could not create the K8s client.")
 	}
-
-	initPrometheusMetrics()
 
 	// Start prometheus.
 	go func() {
