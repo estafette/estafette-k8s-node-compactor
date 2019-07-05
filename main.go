@@ -144,6 +144,8 @@ func main() {
 		log.Fatal().Err(err).Msg("Could not create the K8s client.")
 	}
 
+	initPrometheusMetrics()
+
 	// Start prometheus.
 	go func() {
 		log.Debug().
