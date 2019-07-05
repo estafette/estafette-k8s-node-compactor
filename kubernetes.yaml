@@ -54,9 +54,6 @@ spec:
       - name: ${APP_NAME}
         image: estafette/estafette-k8s-node-compactor:${GO_PIPELINE_LABEL}
         imagePullPolicy: Always
-        env:
-        - name: "PROMETHEUS_SERVER_URL"
-          value: "${PROMETHEUS_SERVER_URL}"
         resources:
           requests:
             cpu: ${CPU_REQUEST}
