@@ -205,7 +205,13 @@ func runNodeCompaction(client *k8s.Client) {
 	for pool, nodes := range nodesByPool {
 		log.Info().Msgf("Node pool: %s\n", pool)
 
-		nodeInfos := collectNodeInfos(nodes, allPods.Items)
+		nodeInfos, err := collectNodeInfos(nodes, allPods.Items)
+
+		if err != nil {
+			log.Error().Err(err).Msgf("Collecting the node info failed on the pool %s, skipping the pool.", pool)
+			continue
+		}
+
 		reportNodePoolMetrics(pool, nodeInfos)
 
 		nodeCountUnderLimit := 0
@@ -301,21 +307,27 @@ func isNodeUnderutilizedCandidate(node nodeInfo) bool {
 		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-3600
 }
 
-func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) []nodeInfo {
+func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, error) {
 	nodeInfos := make([]nodeInfo, 0)
 
 	for _, node := range nodes {
+		labels, err := readNodeLabels(node)
+
+		if err != nil {
+			return nodeInfos, err
+		}
+
 		podsOnNode := getPodsOnNode(node, allPods)
 		nodeInfos = append(
 			nodeInfos,
 			nodeInfo{
 				node:   node,
-				labels: readNodeLabels(node),
+				labels: labels,
 				stats:  calculateNodeStats(node, podsOnNode),
 				pods:   podsOnNode})
 	}
 
-	return nodeInfos
+	return nodeInfos, nil
 }
 
 func reportNodePoolMetrics(pool string, nodes []nodeInfo) {
@@ -421,7 +433,7 @@ func cpuReqStrToCPU(str string) int {
 	return coreCount * 1000
 }
 
-func readNodeLabels(node *corev1.Node) nodeLabels {
+func readNodeLabels(node *corev1.Node) (nodeLabels, error) {
 	labels := nodeLabels{}
 
 	enabledStr, ok := node.Metadata.Labels[labelNodeCompactorEnabled]
@@ -430,7 +442,7 @@ func readNodeLabels(node *corev1.Node) nodeLabels {
 		if err == nil {
 			labels.enabled = e
 		} else {
-			labels.enabled = false
+			return labels, err
 		}
 	} else {
 		labels.enabled = false
@@ -442,7 +454,7 @@ func readNodeLabels(node *corev1.Node) nodeLabels {
 		if err == nil {
 			labels.scaleDownCPURequestRatioLimit = l
 		} else {
-			labels.scaleDownCPURequestRatioLimit = 0
+			return labels, err
 		}
 	} else {
 		labels.scaleDownCPURequestRatioLimit = 0
@@ -454,7 +466,7 @@ func readNodeLabels(node *corev1.Node) nodeLabels {
 		if err == nil {
 			labels.scaleDownRequiredUnderutilizedNodeCount = int(c)
 		} else {
-			labels.scaleDownRequiredUnderutilizedNodeCount = 0
+			return labels, err
 		}
 	} else {
 		labels.scaleDownRequiredUnderutilizedNodeCount = 0
@@ -466,13 +478,13 @@ func readNodeLabels(node *corev1.Node) nodeLabels {
 		if err == nil {
 			labels.scaleDownInProgress = i
 		} else {
-			labels.scaleDownInProgress = false
+			return labels, err
 		}
 	} else {
 		labels.scaleDownInProgress = false
 	}
 
-	return labels
+	return labels, nil
 }
 
 func applyJitter(input int) (output int) {
