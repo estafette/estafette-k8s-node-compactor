@@ -19,14 +19,18 @@ import (
 
 	"github.com/ericchiang/k8s"
 	corev1 "github.com/ericchiang/k8s/apis/core/v1"
+	metav1 "github.com/ericchiang/k8s/apis/meta/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-const labelNodeCompactorEnabled = "estafette.io/node-compactor-enabled"
-const labelNodeCompactorScaleDownCPURequestRatioLimit = "estafette.io/node-compactor-scale-down-cpu-request-ratio-limit"
-const labelNodeCompactorScaleDownRequiredUnderutilizedNodeCount = "estafette.io/node-compactor-scale-down-required-underutilized-node-count"
-const labelNodeCompactorScaleDownInProgress = "estafette.io/node-compactor-scale-down-in-progress"
+const (
+	labelNodeCompactorEnabled                                 = "estafette.io/node-compactor-enabled"
+	labelNodeCompactorScaleDownCPURequestRatioLimit           = "estafette.io/node-compactor-scale-down-cpu-request-ratio-limit"
+	labelNodeCompactorScaleDownRequiredUnderutilizedNodeCount = "estafette.io/node-compactor-scale-down-required-underutilized-node-count"
+	labelNodeCompactorScaleDownInProgress                     = "estafette.io/node-compactor-scale-down-in-progress"
+	podSafeToEvictKey                                         = "cluster-autoscaler.kubernetes.io/safe-to-evict"
+)
 
 type nodeLabels struct {
 	// Shows whether the node compactor is enabled for the node.
@@ -311,12 +315,66 @@ func filterPodsToDrain(pods []*corev1.Pod) (output []*corev1.Pod) {
 	return
 }
 
+func hasLocalStorage(pod *corev1.Pod) bool {
+	for _, volume := range pod.Spec.Volumes {
+		isLocalVolume := volume.VolumeSource.HostPath != nil || volume.VolumeSource.EmptyDir != nil
+		if isLocalVolume {
+			return true
+		}
+	}
+	return false
+}
+
+// Returns whether the pod is replicated.
+// We consider a pod replicated if it has a controller reference of Kind "ReplicationController", "DaemonSet", "Job", "ReplicaSet" or "StatefulSet"
+func isReplicated(pod *corev1.Pod) bool {
+	var controllerRef *metav1.OwnerReference
+	for _, ownerRef := range pod.Metadata.OwnerReferences {
+		if *ownerRef.Controller {
+			controllerRef = ownerRef
+		}
+	}
+
+	if controllerRef == nil {
+		return false
+	}
+
+	return *controllerRef.Kind == "ReplicationController" ||
+		*controllerRef.Kind == "DaemonSet" ||
+		*controllerRef.Kind == "Job" ||
+		*controllerRef.Kind == "ReplicaSet" ||
+		*controllerRef.Kind == "StatefulSet"
+}
+
+// Returns whether the node has a pod which prevents the node from being removed.
+// A pod prevents a node from being removed if either
+// - It's safe to evict annotation is set to false
+// - It has local storage (and its safe to evict annotation is not set to true)
+// - It's not replicated
+func hasPodWhichPreventsNodeRemoval(node nodeInfo) bool {
+	for _, pod := range node.pods {
+		if pod.Metadata.Annotations[podSafeToEvictKey] == "false" {
+			return true
+		}
+
+		if hasLocalStorage(pod) && pod.Metadata.Annotations[podSafeToEvictKey] != "true" {
+			return true
+		}
+
+		if !isReplicated(pod) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Picks a node to be removed. We pick the node with the lowest utilization.
 func pickUnderutilizedNodeToRemove(nodes []nodeInfo) *nodeInfo {
 	var pick *nodeInfo
 
 	for i, n := range nodes {
-		if isNodeUnderutilizedCandidate(n) && (pick == nil || n.stats.utilizedCPURatio < pick.stats.utilizedCPURatio) {
+		if isNodeUnderutilizedCandidate(n) && !hasPodWhichPreventsNodeRemoval(n) && (pick == nil || n.stats.utilizedCPURatio < pick.stats.utilizedCPURatio) {
 			pick = &nodes[i]
 		}
 	}
