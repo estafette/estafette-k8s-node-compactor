@@ -293,9 +293,9 @@ func drainPods(node *nodeInfo, k8sClient *k8s.Client) error {
 
 func filterPodsToDrain(pods []*corev1.Pod) (output []*corev1.Pod) {
 	for _, pod := range pods {
-		// Skip DaemonSets
 		addPod := true
 
+		// Skip DaemonSets
 		for _, ownerRef := range pod.Metadata.OwnerReferences {
 			if *ownerRef.Kind == "DaemonSet" {
 				addPod = false
