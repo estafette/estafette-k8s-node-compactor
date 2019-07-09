@@ -57,6 +57,7 @@ type nodeInfo struct {
 }
 
 var (
+	app       string
 	version   string
 	branch    string
 	revision  string
@@ -132,6 +133,7 @@ func main() {
 	stdlog.SetOutput(log.Logger)
 
 	log.Info().
+		Str("app", app).
 		Str("branch", branch).
 		Str("revision", revision).
 		Str("buildDate", buildDate).
