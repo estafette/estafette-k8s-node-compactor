@@ -274,7 +274,7 @@ func cordonAndMarkNode(node *corev1.Node, k8sClient *k8s.Client) error {
 }
 
 func drainPods(node *nodeInfo, k8sClient *k8s.Client) error {
-	for _, pod := range node.pods {
+	for _, pod := range filterPodsToDrain(node.pods) {
 		err := k8sClient.Delete(context.Background(), pod)
 
 		if err != nil {
@@ -283,6 +283,30 @@ func drainPods(node *nodeInfo, k8sClient *k8s.Client) error {
 	}
 
 	return nil
+}
+
+func filterPodsToDrain(pods []*corev1.Pod) (output []*corev1.Pod) {
+	for _, pod := range pods {
+		// Skip DaemonSets
+		addPod := true
+
+		for _, ownerRef := range pod.Metadata.OwnerReferences {
+			if *ownerRef.Kind == "DaemonSet" {
+				addPod = false
+			}
+		}
+
+		// Skip pods in the kube-system namespace
+		if *pod.Metadata.Namespace == "kube-system" {
+			addPod = false
+		}
+
+		if addPod {
+			output = append(output, pod)
+		}
+	}
+
+	return
 }
 
 // Picks a node to be removed. We pick the node with the lowest utilization.
