@@ -202,8 +202,11 @@ func runNodeCompaction(client *k8s.Client) {
 
 	nodesByPool := groupNodesByPool(nodes.Items)
 
+	// NOTE: We need to reset the metrics, otherwise information about already removed nodes would stay reported forever.
+	resetNodePoolMetrics()
+
 	for pool, nodes := range nodesByPool {
-		log.Info().Msgf("Node pool: %s\n", pool)
+		log.Info().Msgf("Node pool: %s", pool)
 
 		nodeInfos, err := collectNodeInfos(nodes, allPods.Items)
 
@@ -244,10 +247,10 @@ func runNodeCompaction(client *k8s.Client) {
 				log.Info().Msg("No node was picked for removal.")
 			} else {
 				log.Info().Msg("The node picked for removal:")
-				log.Info().Msgf("Node %v\n", *pick.node.Metadata.Name)
-				log.Info().Msgf("Allocatable CPU: %vm, memory: %vMi\n", pick.stats.allocatableCPU, pick.stats.allocatableMemoryMB)
-				log.Info().Msgf("Pods on node total requests, CPU: %vm, memory: %vMi\n", pick.stats.totalCPURequests, pick.stats.totalMemoryRequests)
-				log.Info().Msgf("CPU utilization: %v%%, memory utilization: %v%%\n", pick.stats.utilizedCPURatio*100, pick.stats.utilizedMemoryRatio*100)
+				log.Info().Msgf("Node %v", *pick.node.Metadata.Name)
+				log.Info().Msgf("Allocatable CPU: %vm, memory: %vMi", pick.stats.allocatableCPU, pick.stats.allocatableMemoryMB)
+				log.Info().Msgf("Pods on node total requests, CPU: %vm, memory: %vMi", pick.stats.totalCPURequests, pick.stats.totalMemoryRequests)
+				log.Info().Msgf("CPU utilization: %v%%, memory utilization: %v%%", pick.stats.utilizedCPURatio*100, pick.stats.utilizedMemoryRatio*100)
 
 				log.Info().Msg("Cordoning the node...")
 				cordonAndMarkNode(pick.node, client)
@@ -328,6 +331,16 @@ func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, 
 	}
 
 	return nodeInfos, nil
+}
+
+func resetNodePoolMetrics() {
+	nodesTotal.Reset()
+	allocatableCpus.Reset()
+	allocatableMemory.Reset()
+	totalCPURequests.Reset()
+	totalMemoryRequests.Reset()
+	utilizedCPURatio.Reset()
+	utilizedMemoryRatio.Reset()
 }
 
 func reportNodePoolMetrics(pool string, nodes []nodeInfo) {

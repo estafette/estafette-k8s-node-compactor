@@ -15,7 +15,7 @@ This means that it can happen that during peak hours we have nodes which are all
 
 ![Nodes tightly packed with pods during peak hours.](/readme-peak-hours.png)
 
-But then during off hours are deployments scale down, so some of the pods are removed, thus the nodes might become uniformly underutilized.
+But then during off hours the deployments scale down, so some of the pods are removed, thus the nodes might become uniformly underutilized.
 
 ![Nodes underutilized in off hours.](/readme-off-hours.png)
 
