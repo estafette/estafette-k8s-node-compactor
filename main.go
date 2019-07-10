@@ -418,7 +418,7 @@ func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, 
 			return nodeInfos, err
 		}
 
-		podsOnNode := getPodsOnNode(node, allPods)
+		podsOnNode := getNonTerminatedPodsOnNode(node, allPods)
 		nodeInfos = append(
 			nodeInfos,
 			nodeInfo{
@@ -454,10 +454,10 @@ func reportNodePoolMetrics(pool string, nodes []nodeInfo) {
 	}
 }
 
-func getPodsOnNode(node *corev1.Node, allPods []*corev1.Pod) []*corev1.Pod {
+func getNonTerminatedPodsOnNode(node *corev1.Node, allPods []*corev1.Pod) []*corev1.Pod {
 	var podsOnNode []*corev1.Pod
 	for _, pod := range allPods {
-		if *pod.Spec.NodeName == *node.Metadata.Name {
+		if *pod.Spec.NodeName == *node.Metadata.Name && *pod.Status.Phase != "Succeeded" && *pod.Status.Phase != "Failed" {
 			podsOnNode = append(podsOnNode, pod)
 		}
 	}
