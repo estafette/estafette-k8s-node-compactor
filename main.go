@@ -171,7 +171,7 @@ func main() {
 	waitGroup := &sync.WaitGroup{}
 
 	go func(waitGroup *sync.WaitGroup) {
-		// loop indefinitely
+		// Loop indefinitely.
 		for {
 			log.Info().Msg("Running node compaction process")
 
@@ -326,24 +326,38 @@ func hasLocalStorage(pod *corev1.Pod) bool {
 }
 
 // Returns whether the pod is replicated.
-// We consider a pod replicated if it has a controller reference of Kind "ReplicationController", "DaemonSet", "Job", "ReplicaSet" or "StatefulSet"
+// We consider a pod replicated if it has a controller reference of Kind "ReplicationController", "Job", "ReplicaSet" or "StatefulSet"
 func isReplicated(pod *corev1.Pod) bool {
-	var controllerRef *metav1.OwnerReference
-	for _, ownerRef := range pod.Metadata.OwnerReferences {
-		if *ownerRef.Controller {
-			controllerRef = ownerRef
-		}
-	}
+	controllerRef := getControllerRef(pod)
 
 	if controllerRef == nil {
 		return false
 	}
 
 	return *controllerRef.Kind == "ReplicationController" ||
-		*controllerRef.Kind == "DaemonSet" ||
 		*controllerRef.Kind == "Job" ||
 		*controllerRef.Kind == "ReplicaSet" ||
 		*controllerRef.Kind == "StatefulSet"
+}
+
+func isDaemonSetPod(pod *corev1.Pod) bool {
+	controllerRef := getControllerRef(pod)
+
+	if controllerRef == nil {
+		return false
+	}
+
+	return *controllerRef.Kind == "DaemonSet"
+}
+
+func getControllerRef(pod *corev1.Pod) (controllerRef *metav1.OwnerReference) {
+	for _, ownerRef := range pod.Metadata.OwnerReferences {
+		if *ownerRef.Controller {
+			controllerRef = ownerRef
+		}
+	}
+
+	return
 }
 
 // Returns whether the node has a pod which prevents the node from being removed.
@@ -357,11 +371,11 @@ func hasPodWhichPreventsNodeRemoval(node nodeInfo) bool {
 			return true
 		}
 
-		if hasLocalStorage(pod) && pod.Metadata.Annotations[podSafeToEvictKey] != "true" {
+		if *pod.Metadata.Namespace != "kube-system" && !isDaemonSetPod(pod) && hasLocalStorage(pod) && pod.Metadata.Annotations[podSafeToEvictKey] != "true" {
 			return true
 		}
 
-		if !isReplicated(pod) {
+		if *pod.Metadata.Namespace != "kube-system" && !isReplicated(pod) && !isDaemonSetPod(pod) {
 			return true
 		}
 	}
