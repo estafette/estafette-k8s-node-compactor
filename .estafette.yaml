@@ -35,7 +35,7 @@ stages:
     - estafette
     when:
       status == 'succeeded' &&
-      branch == 'initial-fixes' &&
+      branch == 'initial' &&
       server == 'gocd'
 
   slack-notify:
