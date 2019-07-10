@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	stdlog "log"
 	"math/rand"
@@ -28,9 +29,14 @@ const (
 	labelNodeCompactorEnabled                                 = "estafette.io/node-compactor-enabled"
 	labelNodeCompactorScaleDownCPURequestRatioLimit           = "estafette.io/node-compactor-scale-down-cpu-request-ratio-limit"
 	labelNodeCompactorScaleDownRequiredUnderutilizedNodeCount = "estafette.io/node-compactor-scale-down-required-underutilized-node-count"
-	labelNodeCompactorScaleDownInProgress                     = "estafette.io/node-compactor-scale-down-in-progress"
+	labelNodeCompactorState                                   = "estafette.io/node-compactor-state"
 	podSafeToEvictKey                                         = "cluster-autoscaler.kubernetes.io/safe-to-evict"
 )
+
+type nodeCompactorState struct {
+	scaleDownInProgress bool
+	lastUpdated         string
+}
 
 type nodeLabels struct {
 	// Shows whether the node compactor is enabled for the node.
@@ -40,8 +46,8 @@ type nodeLabels struct {
 	// The number of nodes which need to be underutilized in order to do the compaction.
 	// (If there is only one underutilized node, we shouldn't delete it, because its pods could not be moved anywhere else.)
 	scaleDownRequiredUnderutilizedNodeCount int
-	// It shows if scaling down is already in progress for this node.
-	scaleDownInProgress bool
+	// Stores the state saved by the compactor controller.
+	state nodeCompactorState
 }
 
 type nodeStats struct {
@@ -179,7 +185,7 @@ func main() {
 			runNodeCompaction(client)
 
 			// Sleep random time around 300 seconds.
-			sleepTime := applyJitter(300)
+			sleepTime := getSleepTime()
 			log.Info().Msgf("Sleeping for %v seconds...", sleepTime)
 			time.Sleep(time.Duration(sleepTime) * time.Second)
 		}
@@ -234,7 +240,7 @@ func runNodeCompaction(client *k8s.Client) {
 				nodeCountUnderLimit++
 			}
 
-			if nodeLabels.scaleDownInProgress {
+			if nodeLabels.state.scaleDownInProgress {
 				nodeCountScaleDownInProgress++
 			}
 		}
@@ -272,9 +278,14 @@ func cordonAndMarkNode(node *corev1.Node, k8sClient *k8s.Client) error {
 	*node.Spec.Unschedulable = true
 
 	// We add an explicit label so in the next iteration we know that this node has already been picked for removal.
-	node.Metadata.Labels[labelNodeCompactorScaleDownInProgress] = "true"
+	newState := nodeCompactorState{scaleDownInProgress: true, lastUpdated: time.Now().Format(time.RFC3339)}
+	nodeCompactorStateByteArray, err := json.Marshal(newState)
+	if err != nil {
+		return err
+	}
+	node.Metadata.Labels[labelNodeCompactorState] = string(nodeCompactorStateByteArray)
 
-	err := k8sClient.Update(context.Background(), node)
+	err = k8sClient.Update(context.Background(), node)
 
 	return err
 }
@@ -404,7 +415,7 @@ func pickUnderutilizedNodeToRemove(nodes []nodeInfo) *nodeInfo {
 func isNodeUnderutilizedCandidate(node nodeInfo) bool {
 	return node.labels.enabled &&
 		node.stats.utilizedCPURatio < node.labels.scaleDownCPURequestRatioLimit &&
-		!node.labels.scaleDownInProgress &&
+		!node.labels.state.scaleDownInProgress &&
 		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-3600
 }
 
@@ -583,19 +594,30 @@ func readNodeLabels(node *corev1.Node) (nodeLabels, error) {
 		labels.scaleDownRequiredUnderutilizedNodeCount = 0
 	}
 
-	scaleDownInProgressStr, ok := node.Metadata.Labels[labelNodeCompactorScaleDownInProgress]
+	stateStr, ok := node.Metadata.Labels[labelNodeCompactorState]
 	if ok {
-		i, err := strconv.ParseBool(scaleDownInProgressStr)
+		state := nodeCompactorState{}
+		err := json.Unmarshal([]byte(stateStr), &state)
 		if err == nil {
-			labels.scaleDownInProgress = i
+			labels.state = state
 		} else {
 			return labels, err
 		}
 	} else {
-		labels.scaleDownInProgress = false
+		labels.state = nodeCompactorState{scaleDownInProgress: false, lastUpdated: ""}
 	}
 
 	return labels, nil
+}
+
+func getSleepTime() int {
+	sleepDurationStr := os.Getenv("SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS")
+	sleepDuration := 300
+	if i, err := strconv.ParseInt(sleepDurationStr, 0, 32); err == nil {
+		sleepDuration = int(i)
+	}
+
+	return applyJitter(sleepDuration)
 }
 
 func applyJitter(input int) (output int) {
