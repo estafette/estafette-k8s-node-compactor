@@ -81,6 +81,9 @@ var (
 	// Seed random number.
 	r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
+	// The minimum age of a node to be considered for removal.
+	minimumNodeAgeSeconds = int64(3600)
+
 	// Create prometheus counter for the total number of nodes.
 	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_node_compactor_node_count",
@@ -127,6 +130,12 @@ func init() {
 func main() {
 	// Parse command line parameters.
 	flag.Parse()
+
+	minimumNodeAgeSecondsStr := os.Getenv("MINIMUM_NODE_AGE_SECONDS")
+
+	if i, err := strconv.ParseInt(minimumNodeAgeSecondsStr, 0, 32); err == nil {
+		minimumNodeAgeSeconds = int64(i)
+	}
 
 	// Log as severity for stackdriver logging to recognize the level.
 	zerolog.LevelFieldName = "severity"
@@ -416,7 +425,7 @@ func isNodeUnderutilizedCandidate(node nodeInfo) bool {
 	return node.labels.enabled &&
 		node.stats.utilizedCPURatio < node.labels.scaleDownCPURequestRatioLimit &&
 		!node.labels.state.scaleDownInProgress &&
-		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-3600
+		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-minimumNodeAgeSeconds
 }
 
 func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, error) {
