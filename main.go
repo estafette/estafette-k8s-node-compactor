@@ -434,7 +434,7 @@ func pickUnderutilizedNodeToRemove(nodes []nodeInfo) *nodeInfo {
 func isNodeUnderutilizedCandidate(node nodeInfo) bool {
 	return node.labels.enabled &&
 		node.stats.utilizedCPURatio < node.labels.scaleDownCPURequestRatioLimit &&
-		!node.labels.state.scaleDownInProgress &&
+		!node.labels.state.ScaleDownInProgress &&
 		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-minimumNodeAgeSeconds
 }
 
