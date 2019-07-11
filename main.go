@@ -210,15 +210,16 @@ func main() {
 }
 
 func runNodeCompaction(client *k8s.Client) {
-	var nodes corev1.NodeList
-	if err := client.List(context.Background(), k8s.AllNamespaces, &nodes); err != nil {
-		log.Fatal().Err(err).Msg("Could not retrieve the list of nodes.")
-	}
-
 	var allPods corev1.PodList
 
 	if err := client.List(context.Background(), k8s.AllNamespaces, &allPods); err != nil {
 		log.Fatal().Err(err).Msg("Could not retrieve the list of pods.")
+	}
+
+	var nodes corev1.NodeList
+
+	if err := client.List(context.Background(), k8s.AllNamespaces, &nodes); err != nil {
+		log.Fatal().Err(err).Msg("Could not retrieve the list of nodes.")
 	}
 
 	nodesByPool := groupNodesByPool(nodes.Items)
