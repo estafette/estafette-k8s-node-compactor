@@ -86,8 +86,16 @@ var (
 
 	// Create prometheus counter for the total number of nodes.
 	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "estafette_node_compactor_node_count",
-		Help: "The number of nodes in the node pool",
+		Name: "estafette_node_compactor_total_node_count",
+		Help: "The total number of nodes in the node pool.",
+	}, []string{"nodepool"})
+	nodesUnderutilized = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_underutilized_node_count",
+		Help: "The number of nodes considered underutilized in the node pool.",
+	}, []string{"nodepool"})
+	nodesScaleDownInProgressTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_scale_down_in_progress_node_count",
+		Help: "The number of nodes in the node pool for which the scaledown is in progress.",
 	}, []string{"nodepool"})
 
 	// Create gauges for the various resource values.
@@ -119,6 +127,8 @@ var (
 
 func init() {
 	prometheus.MustRegister(nodesTotal)
+	prometheus.MustRegister(nodesUnderutilized)
+	prometheus.MustRegister(nodesScaleDownInProgressTotal)
 	prometheus.MustRegister(allocatableCpus)
 	prometheus.MustRegister(allocatableMemory)
 	prometheus.MustRegister(totalCPURequests)
@@ -237,8 +247,6 @@ func runNodeCompaction(client *k8s.Client) {
 			continue
 		}
 
-		reportNodePoolMetrics(pool, nodeInfos)
-
 		nodeCountUnderLimit := 0
 		nodeCountScaleDownInProgress := 0
 
@@ -254,6 +262,8 @@ func runNodeCompaction(client *k8s.Client) {
 				nodeCountScaleDownInProgress++
 			}
 		}
+
+		reportNodePoolMetrics(pool, nodeInfos, nodeCountUnderLimit, nodeCountScaleDownInProgress)
 
 		log.Info().Msgf("Number of underutilized nodes: %d", nodeCountUnderLimit)
 		log.Info().Msgf("Number of nodes already being removed: %d", nodeCountScaleDownInProgress)
@@ -464,6 +474,8 @@ func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, 
 
 func resetNodePoolMetrics() {
 	nodesTotal.Reset()
+	nodesUnderutilized.Reset()
+	nodesScaleDownInProgressTotal.Reset()
 	allocatableCpus.Reset()
 	allocatableMemory.Reset()
 	totalCPURequests.Reset()
@@ -472,8 +484,10 @@ func resetNodePoolMetrics() {
 	utilizedMemoryRatio.Reset()
 }
 
-func reportNodePoolMetrics(pool string, nodes []nodeInfo) {
+func reportNodePoolMetrics(pool string, nodes []nodeInfo, underutilizedCount int, scaledownInProgressCount int) {
 	nodesTotal.WithLabelValues(pool).Set((float64(len(nodes))))
+	nodesUnderutilized.WithLabelValues(pool).Set((float64(underutilizedCount)))
+	nodesScaleDownInProgressTotal.WithLabelValues(pool).Set((float64(scaledownInProgressCount)))
 
 	for _, node := range nodes {
 		allocatableCpus.WithLabelValues(*node.node.Metadata.Name, pool).Set(float64(node.stats.allocatableCPU))
