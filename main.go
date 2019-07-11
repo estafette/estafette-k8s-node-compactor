@@ -29,13 +29,13 @@ const (
 	labelNodeCompactorEnabled                                 = "estafette.io/node-compactor-enabled"
 	labelNodeCompactorScaleDownCPURequestRatioLimit           = "estafette.io/node-compactor-scale-down-cpu-request-ratio-limit"
 	labelNodeCompactorScaleDownRequiredUnderutilizedNodeCount = "estafette.io/node-compactor-scale-down-required-underutilized-node-count"
-	labelNodeCompactorState                                   = "estafette.io/node-compactor-state"
+	annotationNodeCompactorState                              = "estafette.io/node-compactor-state"
 	podSafeToEvictKey                                         = "cluster-autoscaler.kubernetes.io/safe-to-evict"
 )
 
 type nodeCompactorState struct {
-	scaleDownInProgress bool
-	lastUpdated         string
+	ScaleDownInProgress bool   `json:"scaleDownInProgress"`
+	LastUpdated         string `json:"lastUpdated"`
 }
 
 type nodeLabels struct {
@@ -240,7 +240,7 @@ func runNodeCompaction(client *k8s.Client) {
 				nodeCountUnderLimit++
 			}
 
-			if nodeLabels.state.scaleDownInProgress {
+			if nodeLabels.state.ScaleDownInProgress {
 				nodeCountScaleDownInProgress++
 			}
 		}
@@ -265,10 +265,20 @@ func runNodeCompaction(client *k8s.Client) {
 				log.Info().Msgf("CPU utilization: %v%%, memory utilization: %v%%", pick.stats.utilizedCPURatio*100, pick.stats.utilizedMemoryRatio*100)
 
 				log.Info().Msg("Cordoning the node...")
-				cordonAndMarkNode(pick.node, client)
+				err := cordonAndMarkNode(pick.node, client)
 
-				log.Info().Msg("Drain the pods...")
-				drainPods(pick, client)
+				if err != nil {
+					log.Error().Err(err).Msg("Cordoning the node has failed.")
+					continue
+				}
+
+				log.Info().Msg("Draining the pods...")
+				err = drainPods(pick, client)
+
+				if err != nil {
+					log.Error().Err(err).Msg("Draining the pods from the node has failed.")
+					continue
+				}
 			}
 		}
 	}
@@ -278,12 +288,12 @@ func cordonAndMarkNode(node *corev1.Node, k8sClient *k8s.Client) error {
 	*node.Spec.Unschedulable = true
 
 	// We add an explicit label so in the next iteration we know that this node has already been picked for removal.
-	newState := nodeCompactorState{scaleDownInProgress: true, lastUpdated: time.Now().Format(time.RFC3339)}
+	newState := nodeCompactorState{ScaleDownInProgress: true, LastUpdated: time.Now().Format(time.RFC3339)}
 	nodeCompactorStateByteArray, err := json.Marshal(newState)
 	if err != nil {
 		return err
 	}
-	node.Metadata.Labels[labelNodeCompactorState] = string(nodeCompactorStateByteArray)
+	node.Metadata.Annotations[annotationNodeCompactorState] = string(nodeCompactorStateByteArray)
 
 	err = k8sClient.Update(context.Background(), node)
 
@@ -594,7 +604,7 @@ func readNodeLabels(node *corev1.Node) (nodeLabels, error) {
 		labels.scaleDownRequiredUnderutilizedNodeCount = 0
 	}
 
-	stateStr, ok := node.Metadata.Labels[labelNodeCompactorState]
+	stateStr, ok := node.Metadata.Annotations[annotationNodeCompactorState]
 	if ok {
 		state := nodeCompactorState{}
 		err := json.Unmarshal([]byte(stateStr), &state)
@@ -604,7 +614,7 @@ func readNodeLabels(node *corev1.Node) (nodeLabels, error) {
 			return labels, err
 		}
 	} else {
-		labels.state = nodeCompactorState{scaleDownInProgress: false, lastUpdated: ""}
+		labels.state = nodeCompactorState{ScaleDownInProgress: false, LastUpdated: ""}
 	}
 
 	return labels, nil
