@@ -44,6 +44,7 @@ cat kubernetes.yaml | \
     APP_NAME=estafette-k8s-node-compactor \
     NAMESPACE=estafette \
     TEAM_NAME=myteam \
+    ESTAFETTE_K8S_NODE_COMPACTOR_CONFIG="{}" \
     GO_PIPELINE_LABEL=1.0.5 \
     VERSION=1.0.5 \
     CPU_REQUEST=10m \
@@ -53,17 +54,34 @@ cat kubernetes.yaml | \
     envsubst | kubectl apply -f -
 ```
 
-Once the controller is up and running you have to configure your nodes to have certain labels with which the controller can be configured.  
-*(In GKE the set of labels for your nodes can be configured when you create the node pool. In other cloud implementations this might be different.)*
+Once the controller is up and running you have to edit the ConfigMap `estafette-k8s-node-compactor-config`, and set the `estafette-k8s-node-compactor-config.yaml` data item to the Json configuration specifying which node pools the compactor is enabled.  
+The format of the configuration is the following.
 
-You can use the following labels.
+```
+{
+    "nodePools": {
+        "nodepool1": {
+            "enabled": true,
+            "scaleDownCPURequestRatioLimit": 0.75,
+            "scaleDownRequiredUnderutilizedNodeCount": 5
+        },
+        "nodepool2": {
+            "enabled": true,
+            "scaleDownCPURequestRatioLimit": 0.6,
+            "scaleDownRequiredUnderutilizedNodeCount": 3
+        }
+    }
+}
+```
 
- - `estafette.io/node-compactor-enabled`: With this label the node compaction can be enabled for a node pool. The node compaction will only happen for the node pool in which the nodes have this label with the value `"true"`.
- - `estafette.io/node-compactor-scale-down-cpu-request-ratio-limit`: Specifies the limit of CPU utilization under which a node is considered for removal. (To get value out of using this controller, it should be set to a higher value then what the built-in limit of the Cluster Autoscaler is.)
- - `estafette.io/node-compactor-scale-down-required-underutilized-node-count`: The number of underutilized nodes needed to start a scaledown. This setting is needed, because if there is only one single underutilized node, and all the others are tightly packed, then there is no point in removing that node, because its pods wouldn't fit anywhere, so a new node would be started in its place anyway.  
+Where the field names in the `nodePools` object have to be equal to the name (which is in the `cloud.google.com/gke-nodepool` label). The fields which can be configured for each node pool are the following.
+
+ - `enabled`: With this label the node compaction can be enabled for a node pool. The node compaction will only happen for the node pool in which the nodes have this label with the value `"true"`.
+ - `scaleDownCPURequestRatioLimit`: Specifies the limit of CPU utilization under which a node is considered for removal. (To get value out of using this controller, it should be set to a higher value then what the built-in limit of the Cluster Autoscaler is.)
+ - `scaleDownRequiredUnderutilizedNodeCount`: The number of underutilized nodes needed to start a scaledown. This setting is needed, because if there is only one single underutilized node, and all the others are tightly packed, then there is no point in removing that node, because its pods wouldn't fit anywhere, so a new node would be started in its place anyway.  
  This has to be depending on the CPU limit we configured to ensure that we only do a scaledown when there are enough underutilized nodes to take over the load. For example If that's set to 75% (`0.75`), then we can set this label to `5`, but if the limit is 90% (`0.9`), then this label has to be set to `10`.
 
-*Technically these labels are on the individual nodes, but all of them are interpreted on the node pool level, so every node in a single node pool should have these labels with the same values. Otherwise the behavior of the controller might be inconsistent, because it's not guaranteed which node it'll pick to read this configuration from.*
+*The default value of the `enabled` field is `false`, so we only have to include the node pools in the configuration for which we want to enable the compactor.*
 
 ## Algorithm
 
