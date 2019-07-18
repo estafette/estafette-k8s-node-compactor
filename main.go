@@ -26,28 +26,29 @@ import (
 )
 
 const (
-	labelNodeCompactorEnabled                                 = "estafette.io/node-compactor-enabled"
-	labelNodeCompactorScaleDownCPURequestRatioLimit           = "estafette.io/node-compactor-scale-down-cpu-request-ratio-limit"
-	labelNodeCompactorScaleDownRequiredUnderutilizedNodeCount = "estafette.io/node-compactor-scale-down-required-underutilized-node-count"
-	annotationNodeCompactorState                              = "estafette.io/node-compactor-state"
-	podSafeToEvictKey                                         = "cluster-autoscaler.kubernetes.io/safe-to-evict"
+	nodeCompactorConfigMapName    = "estafette-k8s-node-compactor-config"
+	nodeCompactorConfigMapDataKey = "estafette-k8s-node-compactor-config.yaml"
+	annotationNodeCompactorState  = "estafette.io/node-compactor-state"
+	podSafeToEvictKey             = "cluster-autoscaler.kubernetes.io/safe-to-evict"
 )
+
+type nodePoolConfig struct {
+	// Shows whether the node compactor is enabled for the node pool.
+	Enabled bool `json:"enabled"`
+	// Sets the percentage if under which the CPU utilization falls, the node gets deleted.
+	ScaleDownCPURequestRatioLimit float64 `json:"scaleDownCPURequestRatioLimit"`
+	// The number of nodes which need to be underutilized in order to do the compaction.
+	// (If there is only one underutilized node, we shouldn't delete it, because its pods could not be moved anywhere else.)
+	ScaleDownRequiredUnderutilizedNodeCount int `json:"scaleDownRequiredUnderutilizedNodeCount"`
+}
+
+type nodeCompactorConfigMap struct {
+	NodePools map[string]nodePoolConfig `json:"nodePools"`
+}
 
 type nodeCompactorState struct {
 	ScaleDownInProgress bool   `json:"scaleDownInProgress"`
 	LastUpdated         string `json:"lastUpdated"`
-}
-
-type nodeLabels struct {
-	// Shows whether the node compactor is enabled for the node.
-	enabled bool
-	// Sets the percentage if under which the CPU utilization falls, the node gets deleted.
-	scaleDownCPURequestRatioLimit float64
-	// The number of nodes which need to be underutilized in order to do the compaction.
-	// (If there is only one underutilized node, we shouldn't delete it, because its pods could not be moved anywhere else.)
-	scaleDownRequiredUnderutilizedNodeCount int
-	// Stores the state saved by the compactor controller.
-	state nodeCompactorState
 }
 
 type nodeStats struct {
@@ -61,7 +62,8 @@ type nodeStats struct {
 
 type nodeInfo struct {
 	node   *corev1.Node
-	labels nodeLabels
+	config nodePoolConfig
+	state  nodeCompactorState
 	stats  nodeStats
 	pods   []*corev1.Pod
 }
@@ -234,13 +236,30 @@ func runNodeCompaction(client *k8s.Client) {
 
 	nodesByPool := groupNodesByPool(nodes.Items)
 
+	var configMap corev1.ConfigMap
+	if err := client.Get(context.Background(), "estafette", nodeCompactorConfigMapName, &configMap); err != nil {
+		log.Fatal().Err(err).Msg("Could not retrieve the ConfigMap.")
+	}
+
+	var configMapData nodeCompactorConfigMap
+
+	if err := json.Unmarshal([]byte(configMap.Data[nodeCompactorConfigMapDataKey]), &configMapData); err != nil {
+		// Couldn't parse the config, we'll use the default
+		log.Error().Err(err).Msg("Unmarshalling the node compactor config failed.")
+	}
+
 	// NOTE: We need to reset the metrics, otherwise information about already removed nodes would stay reported forever.
 	resetNodePoolMetrics()
 
 	for pool, nodes := range nodesByPool {
 		log.Info().Msgf("Node pool: %s", pool)
 
-		nodeInfos, err := collectNodeInfos(nodes, allPods.Items)
+		poolConfig, ok := configMapData.NodePools[pool]
+		if !ok {
+			poolConfig = nodePoolConfig{Enabled: false}
+		}
+
+		nodeInfos, err := collectNodeInfos(nodes, allPods.Items, poolConfig)
 
 		if err != nil {
 			log.Error().Err(err).Msgf("Collecting the node info failed on the pool %s, skipping the pool.", pool)
@@ -252,13 +271,11 @@ func runNodeCompaction(client *k8s.Client) {
 
 		// For every node pool we check if there are enough nodes using less resources than the limit for scaledown.
 		for _, nodeInfo := range nodeInfos {
-			nodeLabels := nodeInfo.labels
-
 			if isNodeUnderutilizedCandidate(nodeInfo) {
 				nodeCountUnderLimit++
 			}
 
-			if nodeLabels.state.ScaleDownInProgress {
+			if nodeInfo.state.ScaleDownInProgress {
 				nodeCountScaleDownInProgress++
 			}
 		}
@@ -272,7 +289,7 @@ func runNodeCompaction(client *k8s.Client) {
 		// NOTE: We multiply by (nodeCountScaleDownInProgress + 1), because there might be nodes for which
 		// we have initiated the scaledown in previous iterations already, which haven't been removed yet,
 		// and we have to take these into account.
-		if nodeCountUnderLimit >= nodeInfos[0].labels.scaleDownRequiredUnderutilizedNodeCount*(nodeCountScaleDownInProgress+1) {
+		if nodeCountUnderLimit >= poolConfig.ScaleDownRequiredUnderutilizedNodeCount+nodeCountScaleDownInProgress {
 			pick := pickUnderutilizedNodeToRemove(nodeInfos)
 
 			if pick == nil {
@@ -307,7 +324,7 @@ func runNodeCompaction(client *k8s.Client) {
 func cordonAndMarkNode(node *corev1.Node, k8sClient *k8s.Client) error {
 	*node.Spec.Unschedulable = true
 
-	// We add an explicit label so in the next iteration we know that this node has already been picked for removal.
+	// We save the state so that in the next iteration we know that this node has already been picked for removal.
 	newState := nodeCompactorState{ScaleDownInProgress: true, LastUpdated: time.Now().Format(time.RFC3339)}
 	nodeCompactorStateByteArray, err := json.Marshal(newState)
 	if err != nil {
@@ -443,17 +460,17 @@ func pickUnderutilizedNodeToRemove(nodes []nodeInfo) *nodeInfo {
 // - Its scaledown is not in progress yet
 // - It's older than one hour (to prevent continuously deleting newly created nodes)
 func isNodeUnderutilizedCandidate(node nodeInfo) bool {
-	return node.labels.enabled &&
-		node.stats.utilizedCPURatio < node.labels.scaleDownCPURequestRatioLimit &&
-		!node.labels.state.ScaleDownInProgress &&
+	return node.config.Enabled &&
+		node.stats.utilizedCPURatio < node.config.ScaleDownCPURequestRatioLimit &&
+		!node.state.ScaleDownInProgress &&
 		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-minimumNodeAgeSeconds
 }
 
-func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, error) {
+func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod, poolConfig nodePoolConfig) ([]nodeInfo, error) {
 	nodeInfos := make([]nodeInfo, 0)
 
 	for _, node := range nodes {
-		labels, err := readNodeLabels(node)
+		state, err := readNodeState(node)
 
 		if err != nil {
 			return nodeInfos, err
@@ -464,8 +481,9 @@ func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod) ([]nodeInfo, 
 			nodeInfos,
 			nodeInfo{
 				node:   node,
-				labels: labels,
+				config: poolConfig,
 				stats:  calculateNodeStats(node, podsOnNode),
+				state:  state,
 				pods:   podsOnNode})
 	}
 
@@ -589,59 +607,19 @@ func cpuReqStrToCPU(str string) int {
 	return coreCount * 1000
 }
 
-func readNodeLabels(node *corev1.Node) (nodeLabels, error) {
-	labels := nodeLabels{}
-
-	enabledStr, ok := node.Metadata.Labels[labelNodeCompactorEnabled]
-	if ok {
-		e, err := strconv.ParseBool(enabledStr)
-		if err == nil {
-			labels.enabled = e
-		} else {
-			return labels, err
-		}
-	} else {
-		labels.enabled = false
-	}
-
-	ratioLimitStr, ok := node.Metadata.Labels[labelNodeCompactorScaleDownCPURequestRatioLimit]
-	if ok {
-		l, err := strconv.ParseFloat(ratioLimitStr, 64)
-		if err == nil {
-			labels.scaleDownCPURequestRatioLimit = l
-		} else {
-			return labels, err
-		}
-	} else {
-		labels.scaleDownCPURequestRatioLimit = 0
-	}
-
-	nodeCountStr, ok := node.Metadata.Labels[labelNodeCompactorScaleDownRequiredUnderutilizedNodeCount]
-	if ok {
-		c, err := strconv.ParseInt(nodeCountStr, 10, 0)
-		if err == nil {
-			labels.scaleDownRequiredUnderutilizedNodeCount = int(c)
-		} else {
-			return labels, err
-		}
-	} else {
-		labels.scaleDownRequiredUnderutilizedNodeCount = 0
-	}
-
+func readNodeState(node *corev1.Node) (state nodeCompactorState, err error) {
 	stateStr, ok := node.Metadata.Annotations[annotationNodeCompactorState]
 	if ok {
-		state := nodeCompactorState{}
+		state = nodeCompactorState{}
 		err := json.Unmarshal([]byte(stateStr), &state)
-		if err == nil {
-			labels.state = state
-		} else {
-			return labels, err
+		if err != nil {
+			return state, err
 		}
 	} else {
-		labels.state = nodeCompactorState{ScaleDownInProgress: false, LastUpdated: ""}
+		state = nodeCompactorState{ScaleDownInProgress: false, LastUpdated: ""}
 	}
 
-	return labels, nil
+	return state, nil
 }
 
 func getSleepTime() int {
