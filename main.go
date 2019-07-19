@@ -84,7 +84,7 @@ var (
 	r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// The minimum age of a node to be considered for removal.
-	minimumNodeAgeSeconds = int64(3600)
+	minimumNodeAgeSeconds = int64(1200)
 
 	// Create prometheus counter for the total number of nodes.
 	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
