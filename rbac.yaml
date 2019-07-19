@@ -6,6 +6,9 @@ metadata:
     app: estafette-k8s-node-compactor
 rules:
 - apiGroups: [""] # "" indicates the core API group
+  resources: ["configmaps"]
+  verbs: ["list", "watch"]
+- apiGroups: [""] # "" indicates the core API group
   resources: ["nodes"]
   verbs: ["list", "update", "watch"]
 - apiGroups: [""] # "" indicates the core API group

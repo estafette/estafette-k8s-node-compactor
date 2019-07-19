@@ -17,7 +17,8 @@ kind: ConfigMap
 metadata:
   name: ${APP_NAME}-config
 data:
-  estafette-k8s-node-compactor-config.yaml: ${ESTAFETTE_K8S_NODE_COMPACTOR_CONFIG}
+  estafette-k8s-node-compactor-config.yaml: |
+    ${ESTAFETTE_K8S_NODE_COMPACTOR_CONFIG}
 ---
 apiVersion: extensions/v1beta1
 kind: Deployment
