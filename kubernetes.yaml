@@ -62,6 +62,13 @@ spec:
       - name: ${APP_NAME}
         image: estafette/estafette-k8s-node-compactor:${GO_PIPELINE_LABEL}
         imagePullPolicy: Always
+        env:
+        - name: "MINIMUM_NODE_AGE_SECONDS"
+          value: "${MINIMUM_NODE_AGE_SECONDS}"
+        - name: "NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS"
+          value: "${NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS}"
+        - name: "SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS"
+          value: "${SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS}"
         resources:
           requests:
             cpu: ${CPU_REQUEST}
