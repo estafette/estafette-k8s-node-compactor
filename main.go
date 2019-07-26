@@ -300,10 +300,12 @@ func runNodeCompaction(client *k8s.Client) {
 				nodeCountScaleDownInProgress++
 			}
 
-			err = updateNodeMarkedState(nodeInfo, isNodeUnderutilized, client)
-			if err != nil {
-				log.Error().Err(err).Msg("Updating the marked state of the node has failed.")
-				continue
+			if poolConfig.Enabled {
+				err = updateNodeMarkedState(nodeInfo, isNodeUnderutilized, client)
+				if err != nil {
+					log.Error().Err(err).Msg("Updating the marked state of the node has failed.")
+					continue
+				}
 			}
 		}
 
