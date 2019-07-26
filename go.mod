@@ -5,7 +5,7 @@ go 1.12
 require (
 	github.com/coreos/go-systemd v0.0.0-20190620071333-e64a0ec8b42a // indirect
 	github.com/ericchiang/k8s v1.2.0
-	github.com/ghodss/yaml v1.0.0 // indirect
+	github.com/ghodss/yaml v1.0.0
 	github.com/go-kit/kit v0.9.0 // indirect
 	github.com/gogo/protobuf v1.2.1 // indirect
 	github.com/kisielk/errcheck v1.2.0 // indirect

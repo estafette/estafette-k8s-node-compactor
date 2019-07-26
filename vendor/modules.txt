@@ -10,6 +10,8 @@ github.com/ericchiang/k8s/apis/apiextensions/v1beta1
 github.com/ericchiang/k8s/apis/resource
 github.com/ericchiang/k8s/runtime/schema
 github.com/ericchiang/k8s/util/intstr
+# github.com/ghodss/yaml v1.0.0
+github.com/ghodss/yaml
 # github.com/golang/protobuf v1.3.1
 github.com/golang/protobuf/proto
 # github.com/matttproud/golang_protobuf_extensions v1.0.1
@@ -44,3 +46,5 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/transform
+# gopkg.in/yaml.v2 v2.2.2
+gopkg.in/yaml.v2
