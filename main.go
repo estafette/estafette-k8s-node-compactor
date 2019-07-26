@@ -312,6 +312,7 @@ func runNodeCompaction(client *k8s.Client) {
 		reportNodePoolMetrics(pool, nodeInfos, nodeCountUnderLimit, nodeCountMarkedForRemoval, nodeCountScaleDownInProgress)
 
 		log.Info().Msgf("Number of underutilized nodes: %d", nodeCountUnderLimit)
+		log.Info().Msgf("Number of nodes marked for removal: %d", nodeCountMarkedForRemoval)
 		log.Info().Msgf("Number of nodes already being removed: %d", nodeCountScaleDownInProgress)
 
 		// We check if there are enough underutilized pods so that we can initiate a scaledown.
