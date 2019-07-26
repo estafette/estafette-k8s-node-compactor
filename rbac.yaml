@@ -1,0 +1,31 @@
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: estafette-k8s-node-compactor
+  labels:
+    app: estafette-k8s-node-compactor
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["nodes"]
+  verbs: ["list", "update", "watch"]
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["list", "update", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: estafette-k8s-node-compactor
+  labels:
+    app: estafette-k8s-node-compactor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: estafette-k8s-node-compactor
+subjects:
+- kind: ServiceAccount
+  name: estafette-k8s-node-compactor
+  namespace: estafette
