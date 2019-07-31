@@ -87,9 +87,10 @@ Where the field names in the `nodePools` object have to be equal to the name (wh
 
 The algorithm used by the controller is the following:
 
- - We check all the nodes for which estafette.io/node-compactor-enabled is enabled, and check if their CPU utilization is under the limit specified in estafette.io/node-compactor-scale-down-cpu-request-ratio-limit.
- - If we have at least as many underutilized nodes as estafette.io/node-compactor-scale-down-required-underutilized-node-count, then we start a scaledown.
- - When scaling down, we pick the node with the lowest utilization.
+ - We iterate over all the node pools. (The actual compaction only happens for the pools for which it's enabled in the configuration, but the metrics are published for every pool.)
+ - All the nodes for which the CPU utilization is under the limit specified in `scaleDownCPURequestRatioLimit` are marked for removal, and the time of marking it is saved. (If a node has already been marked, but its utilization has increased over the limit, then the mark is removed.)
+ - If we have at least as many underutilized nodes as `scaleDownRequiredUnderutilizedNodeCount`, then we try to pick a node for scaledown.
+ - When scaling down, we check if there is a node which has been marked for removal for at least 5 minutes (customizable with the `NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS` env var), we pick it for removal. If there are multiple suitable candidates, we pick the one with the lowest current CPU utilization.
  - Removing a node consists of two steps:
    - Cordoning it
    - Deleting all of its pods
