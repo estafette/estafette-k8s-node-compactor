@@ -35,7 +35,7 @@ stages:
     - estafette
     when:
       status == 'succeeded' &&
-      branch == 'improve-algorithm' &&
+      branch == 'master' &&
       server == 'gocd'
 
   slack-notify:
