@@ -47,6 +47,8 @@ type nodeCompactorConfigMap struct {
 }
 
 type nodeCompactorState struct {
+	MarkedForRemoval    bool   `json:"markedForRemoval"`
+	MarkedAt            string `json:"markedAt"`
 	ScaleDownInProgress bool   `json:"scaleDownInProgress"`
 	LastUpdated         string `json:"lastUpdated"`
 }
@@ -86,6 +88,9 @@ var (
 	// The minimum age of a node to be considered for removal.
 	minimumNodeAgeSeconds = int64(1200)
 
+	// The minimum age of a node to be considered for removal.
+	neededMarkedTimeForRemovalSeconds = int64(300)
+
 	// Create prometheus counter for the total number of nodes.
 	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_node_compactor_total_node_count",
@@ -94,6 +99,10 @@ var (
 	nodesUnderutilized = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_node_compactor_underutilized_node_count",
 		Help: "The number of nodes considered underutilized in the node pool.",
+	}, []string{"nodepool"})
+	nodesMarkedForRemoval = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "estafette_node_compactor_marked_for_removal_node_count",
+		Help: "The number of nodes in the node pool which are marked for removal at the moment.",
 	}, []string{"nodepool"})
 	nodesScaleDownInProgressTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "estafette_node_compactor_scale_down_in_progress_node_count",
@@ -130,6 +139,7 @@ var (
 func init() {
 	prometheus.MustRegister(nodesTotal)
 	prometheus.MustRegister(nodesUnderutilized)
+	prometheus.MustRegister(nodesMarkedForRemoval)
 	prometheus.MustRegister(nodesScaleDownInProgressTotal)
 	prometheus.MustRegister(allocatableCpus)
 	prometheus.MustRegister(allocatableMemory)
@@ -147,6 +157,12 @@ func main() {
 
 	if i, err := strconv.ParseInt(minimumNodeAgeSecondsStr, 0, 32); err == nil {
 		minimumNodeAgeSeconds = int64(i)
+	}
+
+	neededMarkedTimeForRemovalSecondsStr := os.Getenv("NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS")
+
+	if i, err := strconv.ParseInt(neededMarkedTimeForRemovalSecondsStr, 0, 32); err == nil {
+		neededMarkedTimeForRemovalSeconds = int64(i)
 	}
 
 	// Log as severity for stackdriver logging to recognize the level.
@@ -213,8 +229,7 @@ func main() {
 	}(waitGroup)
 
 	signalReceived := <-gracefulShutdown
-	log.Info().
-		Msgf("Received signal %v. Waiting for running tasks to finish...", signalReceived)
+	log.Info().Msgf("Received signal %v. Waiting for running tasks to finish...", signalReceived)
 
 	waitGroup.Wait()
 
@@ -267,22 +282,37 @@ func runNodeCompaction(client *k8s.Client) {
 		}
 
 		nodeCountUnderLimit := 0
+		nodeCountMarkedForRemoval := 0
 		nodeCountScaleDownInProgress := 0
 
 		// For every node pool we check if there are enough nodes using less resources than the limit for scaledown.
 		for _, nodeInfo := range nodeInfos {
-			if isNodeUnderutilizedCandidate(nodeInfo) {
+			isNodeUnderutilized := isNodeUnderutilizedCandidate(nodeInfo)
+			if isNodeUnderutilized {
 				nodeCountUnderLimit++
+			}
+
+			if nodeInfo.state.MarkedForRemoval {
+				nodeCountMarkedForRemoval++
 			}
 
 			if nodeInfo.state.ScaleDownInProgress {
 				nodeCountScaleDownInProgress++
 			}
+
+			if poolConfig.Enabled {
+				err = updateNodeMarkedState(nodeInfo, isNodeUnderutilized, client)
+				if err != nil {
+					log.Error().Err(err).Msg("Updating the marked state of the node has failed.")
+					continue
+				}
+			}
 		}
 
-		reportNodePoolMetrics(pool, nodeInfos, nodeCountUnderLimit, nodeCountScaleDownInProgress)
+		reportNodePoolMetrics(pool, nodeInfos, nodeCountUnderLimit, nodeCountMarkedForRemoval, nodeCountScaleDownInProgress)
 
 		log.Info().Msgf("Number of underutilized nodes: %d", nodeCountUnderLimit)
+		log.Info().Msgf("Number of nodes marked for removal: %d", nodeCountMarkedForRemoval)
 		log.Info().Msgf("Number of nodes already being removed: %d", nodeCountScaleDownInProgress)
 
 		// We check if there are enough underutilized pods so that we can initiate a scaledown.
@@ -321,12 +351,42 @@ func runNodeCompaction(client *k8s.Client) {
 	}
 }
 
+func updateNodeMarkedState(node nodeInfo, isNodeUnderutilized bool, k8sClient *k8s.Client) error {
+	if node.state.ScaleDownInProgress {
+		return nil
+	}
+
+	update := false
+
+	// We only update the node state if needed, we don't send a needless update, because it's resource-intensive, and updates can occasionally fail.
+	if !node.state.MarkedForRemoval && isNodeUnderutilized {
+		node.state = nodeCompactorState{MarkedForRemoval: true, MarkedAt: time.Now().Format(time.RFC3339), ScaleDownInProgress: false, LastUpdated: time.Now().Format(time.RFC3339)}
+		update = true
+	}
+
+	if node.state.MarkedForRemoval && !isNodeUnderutilized {
+		node.state = nodeCompactorState{MarkedForRemoval: false, MarkedAt: "", ScaleDownInProgress: false, LastUpdated: time.Now().Format(time.RFC3339)}
+		update = true
+	}
+
+	if update {
+		return updateNodeStateAnnotation(node.node, node.state, k8sClient)
+	}
+
+	return nil
+}
+
 func cordonAndMarkNode(node *corev1.Node, k8sClient *k8s.Client) error {
 	*node.Spec.Unschedulable = true
 
 	// We save the state so that in the next iteration we know that this node has already been picked for removal.
-	newState := nodeCompactorState{ScaleDownInProgress: true, LastUpdated: time.Now().Format(time.RFC3339)}
-	nodeCompactorStateByteArray, err := json.Marshal(newState)
+	newState := nodeCompactorState{ScaleDownInProgress: true, LastUpdated: time.Now().Format(time.RFC3339), MarkedForRemoval: false, MarkedAt: ""}
+
+	return updateNodeStateAnnotation(node, newState, k8sClient)
+}
+
+func updateNodeStateAnnotation(node *corev1.Node, state nodeCompactorState, k8sClient *k8s.Client) error {
+	nodeCompactorStateByteArray, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
@@ -446,12 +506,27 @@ func pickUnderutilizedNodeToRemove(nodes []nodeInfo) *nodeInfo {
 	var pick *nodeInfo
 
 	for i, n := range nodes {
-		if isNodeUnderutilizedCandidate(n) && !hasPodWhichPreventsNodeRemoval(n) && (pick == nil || n.stats.utilizedCPURatio < pick.stats.utilizedCPURatio) {
+
+		if isNodeMarkedForRemovalLongEnough(n) && !hasPodWhichPreventsNodeRemoval(n) && (pick == nil || n.stats.utilizedCPURatio < pick.stats.utilizedCPURatio) {
 			pick = &nodes[i]
 		}
 	}
 
 	return pick
+}
+
+func isNodeMarkedForRemovalLongEnough(node nodeInfo) bool {
+	if !node.state.MarkedForRemoval {
+		return false
+	}
+
+	markedAt, err := time.Parse(time.RFC3339, node.state.MarkedAt)
+
+	if err != nil {
+		return false
+	}
+
+	return int64(time.Now().Sub(markedAt).Seconds()) >= neededMarkedTimeForRemovalSeconds
 }
 
 // Returns if the node is a candidate for removing it for compacting the pool.
@@ -493,6 +568,7 @@ func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod, poolConfig no
 func resetNodePoolMetrics() {
 	nodesTotal.Reset()
 	nodesUnderutilized.Reset()
+	nodesMarkedForRemoval.Reset()
 	nodesScaleDownInProgressTotal.Reset()
 	allocatableCpus.Reset()
 	allocatableMemory.Reset()
@@ -502,9 +578,10 @@ func resetNodePoolMetrics() {
 	utilizedMemoryRatio.Reset()
 }
 
-func reportNodePoolMetrics(pool string, nodes []nodeInfo, underutilizedCount int, scaledownInProgressCount int) {
+func reportNodePoolMetrics(pool string, nodes []nodeInfo, underutilizedCount int, markedForRemovalCount, scaledownInProgressCount int) {
 	nodesTotal.WithLabelValues(pool).Set((float64(len(nodes))))
 	nodesUnderutilized.WithLabelValues(pool).Set((float64(underutilizedCount)))
+	nodesMarkedForRemoval.WithLabelValues(pool).Set((float64(markedForRemovalCount)))
 	nodesScaleDownInProgressTotal.WithLabelValues(pool).Set((float64(scaledownInProgressCount)))
 
 	for _, node := range nodes {
