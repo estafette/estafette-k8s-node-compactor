@@ -12,7 +12,7 @@ version:
     minor: 1
     patch: 1
     labelTemplate: '{{branch}}-{{auto}}'
-    releaseBranch: 1.2.0
+    releaseBranch: 1.1.1
 
 stages:
   build-lint-and-package:
