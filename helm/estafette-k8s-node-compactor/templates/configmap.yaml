@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "estafette-k8s-node-compactor.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+{{ include "estafette-k8s-node-compactor.labels" . | indent 4 }}
+data:
+  estafette-k8s-node-compactor-config.yaml: |
+    {{.Values.configmap.compactorConfig}}

@@ -4,25 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	stdlog "log"
-	"math/rand"
-	"net/http"
-	"os"
-	"os/signal"
 	"runtime"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/alecthomas/kingpin"
+	foundation "github.com/estafette/estafette-foundation"
 	"github.com/rs/zerolog/log"
 
 	"github.com/ericchiang/k8s"
 	corev1 "github.com/ericchiang/k8s/apis/core/v1"
 	metav1 "github.com/ericchiang/k8s/apis/meta/v1"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -71,6 +65,7 @@ type nodeInfo struct {
 }
 
 var (
+	appgroup  string
 	app       string
 	version   string
 	branch    string
@@ -82,14 +77,9 @@ var (
 var (
 	addr = flag.String("listen-address", ":9101", "The address to listen on for HTTP requests.")
 
-	// Seed random number.
-	r = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	// The minimum age of a node to be considered for removal.
-	minimumNodeAgeSeconds = int64(1200)
-
-	// The minimum age of a node to be considered for removal.
-	neededMarkedTimeForRemovalSeconds = int64(300)
+	minimumNodeAgeSeconds                 = kingpin.Flag("minimum-node-age-seconds", "The number of seconds before a new node is inspected for compaction.").Default("1200").OverrideDefaultFromEnvar("MINIMUM_NODE_AGE_SECONDS").Int64()
+	neededMarkedTimeForRemovalSeconds     = kingpin.Flag("needed-marked-time-for-seconds", "The number of seconds a node will be removed after marking it for removal.").Default("300").OverrideDefaultFromEnvar("NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS").Int64()
+	sleepDurationBetweenIterationsSeconds = kingpin.Flag("sleep-duration-between-iterations-seconds", "The number of seconds between compaction runs.").Default("300").OverrideDefaultFromEnvar("SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS").Int()
 
 	// Create prometheus counter for the total number of nodes.
 	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -150,42 +140,14 @@ func init() {
 }
 
 func main() {
-	// Parse command line parameters.
-	flag.Parse()
+	// parse command line parameters
+	kingpin.Parse()
 
-	minimumNodeAgeSecondsStr := os.Getenv("MINIMUM_NODE_AGE_SECONDS")
+	// init log format from envvar ESTAFETTE_LOG_FORMAT
+	foundation.InitLoggingFromEnv(foundation.NewApplicationInfo(appgroup, app, version, branch, revision, buildDate))
 
-	if i, err := strconv.ParseInt(minimumNodeAgeSecondsStr, 0, 32); err == nil {
-		minimumNodeAgeSeconds = int64(i)
-	}
-
-	neededMarkedTimeForRemovalSecondsStr := os.Getenv("NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS")
-
-	if i, err := strconv.ParseInt(neededMarkedTimeForRemovalSecondsStr, 0, 32); err == nil {
-		neededMarkedTimeForRemovalSeconds = int64(i)
-	}
-
-	// Log as severity for stackdriver logging to recognize the level.
-	zerolog.LevelFieldName = "severity"
-
-	// Set some default fields added to all logs.
-	log.Logger = zerolog.New(os.Stdout).With().
-		Timestamp().
-		Str("app", "estafette-k8s-hpa-scaler").
-		Str("version", version).
-		Logger()
-
-	// Use zerolog for any logs sent via standard log library.
-	stdlog.SetFlags(0)
-	stdlog.SetOutput(log.Logger)
-
-	log.Info().
-		Str("app", app).
-		Str("branch", branch).
-		Str("revision", revision).
-		Str("buildDate", buildDate).
-		Str("goVersion", goVersion).
-		Msg("Starting estafette-k8s-hpa-scaler...")
+	// init /liveness endpoint
+	foundation.InitLiveness()
 
 	client, err := k8s.NewInClusterClient()
 
@@ -193,25 +155,11 @@ func main() {
 		log.Fatal().Err(err).Msg("Could not create the K8s client.")
 	}
 
-	// Start prometheus.
-	go func() {
-		log.Debug().
-			Str("port", *addr).
-			Msg("Serving Prometheus metrics...")
+	// start prometheus
+	foundation.InitMetrics()
 
-		http.Handle("/metrics", promhttp.Handler())
-
-		if err := http.ListenAndServe(*addr, nil); err != nil {
-			log.Fatal().Err(err).Msg("Starting Prometheus listener failed")
-		}
-	}()
-
-	// Define channel used to gracefully shut down the application.
-	gracefulShutdown := make(chan os.Signal)
-
-	signal.Notify(gracefulShutdown, syscall.SIGTERM, syscall.SIGINT)
-
-	waitGroup := &sync.WaitGroup{}
+	// define channel used to gracefully shutdown the application
+	gracefulShutdown, waitGroup := foundation.InitGracefulShutdownHandling()
 
 	go func(waitGroup *sync.WaitGroup) {
 		// Loop indefinitely.
@@ -222,18 +170,13 @@ func main() {
 			runNodeCompaction(client)
 
 			// Sleep random time around 300 seconds.
-			sleepTime := getSleepTime()
+			sleepTime := foundation.ApplyJitter(*sleepDurationBetweenIterationsSeconds)
 			log.Info().Msgf("Sleeping for %v seconds...", sleepTime)
 			time.Sleep(time.Duration(sleepTime) * time.Second)
 		}
 	}(waitGroup)
 
-	signalReceived := <-gracefulShutdown
-	log.Info().Msgf("Received signal %v. Waiting for running tasks to finish...", signalReceived)
-
-	waitGroup.Wait()
-
-	log.Info().Msg("Shutting down...")
+	foundation.HandleGracefulShutdown(gracefulShutdown, waitGroup)
 }
 
 func runNodeCompaction(client *k8s.Client) {
@@ -526,7 +469,7 @@ func isNodeMarkedForRemovalLongEnough(node nodeInfo) bool {
 		return false
 	}
 
-	return int64(time.Now().Sub(markedAt).Seconds()) >= neededMarkedTimeForRemovalSeconds
+	return int64(time.Now().Sub(markedAt).Seconds()) >= *neededMarkedTimeForRemovalSeconds
 }
 
 // Returns if the node is a candidate for removing it for compacting the pool.
@@ -538,7 +481,7 @@ func isNodeUnderutilizedCandidate(node nodeInfo) bool {
 	return node.config.Enabled &&
 		node.stats.utilizedCPURatio < node.config.ScaleDownCPURequestRatioLimit &&
 		!node.state.ScaleDownInProgress &&
-		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-minimumNodeAgeSeconds
+		*node.node.Metadata.CreationTimestamp.Seconds < time.Now().Unix()-*minimumNodeAgeSeconds
 }
 
 func collectNodeInfos(nodes []*corev1.Node, allPods []*corev1.Pod, poolConfig nodePoolConfig) ([]nodeInfo, error) {
@@ -697,20 +640,4 @@ func readNodeState(node *corev1.Node) (state nodeCompactorState, err error) {
 	}
 
 	return state, nil
-}
-
-func getSleepTime() int {
-	sleepDurationStr := os.Getenv("SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS")
-	sleepDuration := 300
-	if i, err := strconv.ParseInt(sleepDurationStr, 0, 32); err == nil {
-		sleepDuration = int(i)
-	}
-
-	return applyJitter(sleepDuration)
-}
-
-func applyJitter(input int) (output int) {
-	deviation := int(0.25 * float64(input))
-
-	return input - deviation + r.Intn(2*deviation)
 }
