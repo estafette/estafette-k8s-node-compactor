@@ -10,7 +10,7 @@ version:
   semver:
     major: 1
     minor: 1
-    patch: 0
+    patch: 1
     labelTemplate: '{{branch}}-{{auto}}'
     releaseBranch: 1.2.0
 
