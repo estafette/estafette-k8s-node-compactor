@@ -1,0 +1,96 @@
+# Default values for estafette-k8s-node-compactor.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+#
+# APPLICATION SETTINGS
+#
+
+configmap:
+  # configures how to aggressively scale down
+  compactorConfig: '{ "nodePools": { "mynodepool": { "enabled": true, "scaleDownCPURequestRatioLimit": 0.75, "scaleDownRequiredUnderutilizedNodeCount": 5 } } }'
+
+# time to inspect a node for compaction after spinning up the node
+minimumNodeAgeSeconds: 0
+
+# time after marking a pod for removal before it's actually removed
+neededMarkedTimeForRemovalSeconds: 600
+
+# time between compaction runs
+sleepDurationBetweenIterationsSeconds: 60
+
+# the following log formats are available: plaintext, console, json, stackdriver, v3 (see https://github.com/estafette/estafette-foundation for more info)
+logFormat: plaintext
+
+#
+# GENERIC SETTINGS
+#
+
+replicaCount: 1
+
+image:
+  repository: estafette/estafette-k8s-node-compactor
+  # The tag can be set to override the appVersion getting used as the image tag
+  tag:
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+rbac:
+  # Specifies whether roles and bindings should be created
+  enable: true
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 200Mi
+  limits:
+    cpu: 200m
+    memory: 400Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 10
+      preference:
+        matchExpressions:
+        - key: cloud.google.com/gke-preemptible
+          operator: In
+          values:
+          - "true"
+
+# pass (additional) arguments to the container
+extraArgs: []
+
+# use to set extra environment variables
+extraEnv: {}
+
+# use to add extra labels
+extraLabels: {}
+
+# use to add extra labels to podspec for getting their values in prometheus
+extraPodLabels: {}

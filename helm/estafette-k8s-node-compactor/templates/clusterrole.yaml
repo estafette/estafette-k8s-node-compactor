@@ -1,0 +1,31 @@
+{{- if .Values.rbac.enable -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "estafette-k8s-node-compactor.fullname" . }}
+  labels:
+{{ include "estafette-k8s-node-compactor.labels" . | indent 4 }}
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups: [""] # "" indicates the core API group
+  resources:
+  - nodes
+  verbs:
+  - list
+  - update
+  - watch
+- apiGroups: [""] # "" indicates the core/v1 API group
+  resources:
+  - pods
+  verbs:
+  - list
+  - update
+  - watch
+  - delete
+{{- end -}}
