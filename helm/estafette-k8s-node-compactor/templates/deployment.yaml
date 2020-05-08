@@ -55,6 +55,8 @@ spec:
               value: "{{ .Values.neededMarkedTimeForRemovalSeconds }}"
             - name: "SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS"
               value: "{{ .Values.sleepDurationBetweenIterationsSeconds }}"
+            - name: "CONFIGMAP_NAME"
+              value: "{{ include "estafette-k8s-node-compactor.fullname" . }}"
             {{- range $key, $value := .Values.extraEnv }}
             - name: {{ $key }}
               value: {{ $value }}

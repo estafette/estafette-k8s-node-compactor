@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	nodeCompactorConfigMapName    = "estafette-k8s-node-compactor-config"
 	nodeCompactorConfigMapDataKey = "estafette-k8s-node-compactor-config.yaml"
 	annotationNodeCompactorState  = "estafette.io/node-compactor-state"
 	podSafeToEvictKey             = "cluster-autoscaler.kubernetes.io/safe-to-evict"
@@ -80,6 +79,7 @@ var (
 	minimumNodeAgeSeconds                 = kingpin.Flag("minimum-node-age-seconds", "The number of seconds before a new node is inspected for compaction.").Default("1200").OverrideDefaultFromEnvar("MINIMUM_NODE_AGE_SECONDS").Int64()
 	neededMarkedTimeForRemovalSeconds     = kingpin.Flag("needed-marked-time-for-seconds", "The number of seconds a node will be removed after marking it for removal.").Default("300").OverrideDefaultFromEnvar("NEEDED_MARKED_TIME_FOR_REMOVAL_SECONDS").Int64()
 	sleepDurationBetweenIterationsSeconds = kingpin.Flag("sleep-duration-between-iterations-seconds", "The number of seconds between compaction runs.").Default("300").OverrideDefaultFromEnvar("SLEEP_DURATION_BETWEEN_ITERATIONS_SECONDS").Int()
+	nodeCompactorConfigMapName            = kingpin.Flag("configmap-name", "Name of the configmap.").Default("estafette-k8s-node-compactor").OverrideDefaultFromEnvar("CONFIGMAP_NAME").String()
 
 	// Create prometheus counter for the total number of nodes.
 	nodesTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -195,7 +195,7 @@ func runNodeCompaction(client *k8s.Client) {
 	nodesByPool := groupNodesByPool(nodes.Items)
 
 	var configMap corev1.ConfigMap
-	if err := client.Get(context.Background(), "estafette", nodeCompactorConfigMapName, &configMap); err != nil {
+	if err := client.Get(context.Background(), client.Namespace, *nodeCompactorConfigMapName, &configMap); err != nil {
 		log.Fatal().Err(err).Msg("Could not retrieve the ConfigMap.")
 	}
 
