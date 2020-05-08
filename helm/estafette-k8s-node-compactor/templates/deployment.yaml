@@ -71,18 +71,7 @@ spec:
             timeoutSeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          volumeMounts:
-          - name: letsencrypt-account
-            mountPath: /account
       terminationGracePeriodSeconds: 300
-      volumes:
-      - name: letsencrypt-account
-        secret:
-          secretName: {{ include "estafette-k8s-node-compactor.fullname" . }}
-      dnsConfig:
-        nameservers:
-        - 1.1.1.1
-        - 1.0.0.1
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
